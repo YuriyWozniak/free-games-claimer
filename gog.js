@@ -56,10 +56,16 @@ try {
   // TODO for the below signIn.waitFor(), patchright failed most of the time with: locator.waitFor: JSHandles can be evaluated only in the context they were created!
   // await Promise.any([signIn.waitFor(), page.waitForSelector('#menuUsername')]);
   const username = page.locator('#menuUsername').first();
-  while (await signIn.isVisible() && !await username.isVisible()) {
+  // sign-in state from GOG's own /userData.json: menu-v3 has no #menuUsername, and .first() locators threw
+  // Patchright's "Can't query n-th element" while the page was loading
+  await page.waitForLoadState('load').catch(_ => { });
+  const gogUser = () => page.evaluate(() => fetch('/userData.json', { credentials: 'include' }).then(r => r.json()).catch(() => ({})));
+  const gogSignedIn = async () => !!(await gogUser()).isLoggedIn;
+  const gogSignInShown = () => page.evaluate(() => [...document.querySelectorAll('a,button')].some(e => /^\s*sign in\s*$/i.test(e.textContent) && e.offsetParent !== null));
+  while (await gogSignInShown() && !await gogSignedIn()) {
     console.error('Not signed!');
     if (cfg.nowait) process.exit(1);
-    await signIn.click();
+    await page.evaluate(() => [...document.querySelectorAll('a,button')].find(e => /^\s*sign in\s*$/i.test(e.textContent) && e.offsetParent !== null)?.click());
     // it then creates an iframe for the login
     await page.waitForSelector('#GalaxyAccountsFrameContainer iframe'); // TODO needed?
     const iframe = page.frameLocator('#GalaxyAccountsFrameContainer iframe');
@@ -104,10 +110,10 @@ try {
         process.exit(1);
       }
     }
-    await page.waitForSelector('#menuUsername');
+    for (let i = 0; i < cfg.login_timeout / 3000 && !await gogSignedIn(); i++) await page.waitForTimeout(3000); // wait for the manual login
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
   }
-  user = await page.locator('#menuUsername').first().textContent(); // innerText is uppercase due to styling!
+  user = (await gogUser()).username; // from /userData.json
   console.log(`Signed in as ${user}`);
   db.data[user] ||= {};
 
