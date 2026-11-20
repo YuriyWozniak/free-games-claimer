@@ -12,7 +12,7 @@ export const cfg = {
   interactive: process.env.INTERACTIVE == '1', // confirm to claim, enter to skip
   dryrun: process.env.DRYRUN == '1', // don't claim anything
   nowait: process.env.NOWAIT == '1', // fail fast instead of waiting for user input
-  show: process.env.SHOW == '1', // run non-headless
+  show: true, // always visible: a headless run deletes the profile's sign-ins
   get headless() {
     return !this.debug && !this.show;
   },
