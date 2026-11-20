@@ -448,6 +448,8 @@ try {
       if (cfg.debug) await page.pause();
       if (cfg.dryrun) {
         console.log('  DRYRUN=1 -> Skip order!');
+        console.log('  DRYRUN check: checkout order button found:', await iframe.locator('button:has-text("Add to library"), button:has-text("Place Order")').first().waitFor({ timeout: 30000 }).then(() => true, () => false));
+        await page.goto('about:blank').catch(_ => { }); // close the unused checkout before the next game
         notify_game.status = 'skipped';
         if (cfg.time) console.timeEnd('claim game');
         continue;
@@ -517,6 +519,8 @@ try {
 
       const p = screenshot(`${game_id}.png`);
       if (!existsSync(p)) await page.screenshot({ path: p, fullPage: false }); // fullPage is quite long...
+      await page.keyboard.press('Escape').catch(_ => { }); // close the launcher prompt
+      await page.goto('about:blank').catch(_ => { });
     }
     if (cfg.time) console.timeEnd('claim game');
   }
