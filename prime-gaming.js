@@ -200,8 +200,11 @@ try {
     db.data[user][title] ||= { title, time: datetime(), url, store };
     const notify_game = { title, url };
     notify_games.push(notify_game); // status is updated below
-    if (await page.locator('div:has-text("Link game account")').count() // TODO still needed? epic games store just has 'Link account' as the button text now.
-       || await page.locator('div:has-text("Link account")').count()) {
+    // only a visible "Link (game) account" button or the link-account dialog means linking is needed
+    // (div:has-text("Link account") also matched "Unlink account")
+    await page.waitForTimeout(3000);
+    if (await page.evaluate(() => [...document.querySelectorAll('button, a, [role=button], [data-a-target="LinkAccountModal"]')]
+      .some(e => e.offsetParent !== null && (e.matches('[data-a-target="LinkAccountModal"]') || /^link (game )?account$/i.test(e.textContent.trim())))).catch(_ => false)) {
       console.error('  Account linking is required to claim this offer!');
       notify_game.status = `failed: need account linking for ${store}`;
       db.data[user][title].status = 'failed: need account linking';
