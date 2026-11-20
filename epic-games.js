@@ -195,6 +195,97 @@ try {
       if (cfg.time) console.timeEnd('claim game');
       continue;
     }
+    // random pauses between page loads and clicks (instant clicks triggered hCaptcha challenges)
+    const pause = (min, max) => page.waitForTimeout(min + Math.random() * (max - min));
+    // move the pointer like a hand: curved path in small steps, ease in/out, then press and release
+    const mouseAt = globalThis.fgcMouse ??= { x: 300 + Math.random() * 500, y: 200 + Math.random() * 300 };
+    const humanMove = async (x, y) => {
+      const f = { ...mouseAt }, steps = 20 + Math.floor(Math.random() * 15);
+      const cx = (f.x + x) / 2 + (Math.random() - 0.5) * 200, cy = (f.y + y) / 2 + (Math.random() - 0.5) * 150;
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps, e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+        await page.mouse.move((1 - e) ** 2 * f.x + 2 * (1 - e) * e * cx + e * e * x, (1 - e) ** 2 * f.y + 2 * (1 - e) * e * cy + e * e * y);
+        await page.waitForTimeout(8 + Math.random() * 25);
+      }
+      Object.assign(mouseAt, { x, y });
+    };
+    const scroll = async dy => { // wheel in small notches, like a mouse wheel
+      for (let left = Math.abs(dy); left > 0; left -= 100) { await page.mouse.wheel(0, Math.sign(dy) * Math.min(100, left)); await page.waitForTimeout(40 + Math.random() * 120); }
+    };
+    const wander = async (n, scrolls = 0) => { // look around the page while "reading"
+      const vp = page.viewportSize() || { width: 1280, height: 800 };
+      for (let i = 0; i < n; i++) { await humanMove(100 + Math.random() * (vp.width - 200), 120 + Math.random() * (vp.height - 240)); await pause(400, 1500); }
+      if (scrolls) { // read a bit further down, then come back to the button
+        const dy = 300 + Math.floor(Math.random() * 500);
+        await scroll(dy); await pause(1200, 3500); await scroll(-dy); await pause(500, 1200);
+      }
+    };
+    const humanClick = async loc => {
+      await loc.scrollIntoViewIfNeeded().catch(_ => { });
+      const b = await loc.boundingBox().catch(_ => null); // page coordinates, also for elements inside the checkout iframe
+      if (!b) return loc.click({ delay: 60 + Math.random() * 120 });
+      await humanMove(b.x + b.width * (0.3 + Math.random() * 0.4), b.y + b.height * (0.3 + Math.random() * 0.4));
+      await pause(250, 700);
+      await page.mouse.down();
+      await page.waitForTimeout(60 + Math.random() * 120);
+      await page.mouse.up();
+    };
+    // watch for a captcha challenge a person has to solve (upstream only watches one selector in the checkout).
+    // hCaptcha loads its challenge frame in advance and often passes without showing it, so it only counts when the
+    // frame is really shown: at least 100x100, inside the viewport, not hidden/transparent, and on top at its centre.
+    // While one is shown: log it once per game, save a screenshot (FGC_CAPTCHA_DIR, else the screenshots folder) and,
+    // if FGC_LIVE is set, write a JSON note to that file (for outside notifications); the waits below go on for up to
+    // CAPTCHA_WAIT after it was last seen, so it can be solved by hand. When it goes away, log after how long.
+    // unref: the timer never keeps node running.
+    const CAPTCHA_WAIT = 10 * 60 * 1000;
+    const captchaRecent = () => Date.now() - (globalThis.fgcCaptchaAt || 0) < CAPTCHA_WAIT;
+    globalThis.fgcGame = url; globalThis.fgcCaptchaAt = 0; globalThis.fgcCaptchaFrom = 0;
+    const captchaShown = async () => {
+      for (const f of page.frames()) {
+        if (!/hcaptcha\.com.*frame=challenge|arkoselabs|funcaptcha/i.test(f.url())) continue;
+        const el = await f.frameElement().catch(_ => null);
+        if (el && await el.evaluate(e => {
+          const r = e.getBoundingClientRect(), w = e.ownerDocument.defaultView;
+          if (r.width < 100 || r.height < 100) return false;
+          if (r.right <= 0 || r.bottom <= 0 || r.left >= w.innerWidth || r.top >= w.innerHeight) return false;
+          for (let n = e; n && n.nodeType === 1; n = n.parentElement) {
+            const st = w.getComputedStyle(n);
+            if (st.display === 'none' || st.visibility === 'hidden' || +st.opacity < 0.1) return false;
+          }
+          const x = Math.min(Math.max(r.left + r.width / 2, 0), w.innerWidth - 1);
+          const y = Math.min(Math.max(r.top + r.height / 2, 0), w.innerHeight - 1);
+          const top = e.ownerDocument.elementFromPoint(x, y);
+          return top === e || e.contains(top);
+        }).catch(_ => false)) return true;
+      }
+      return false;
+    };
+    globalThis.fgcCaptcha ??= setInterval(async () => {
+      if (globalThis.fgcCaptchaBusy) return;
+      globalThis.fgcCaptchaBusy = true;
+      try {
+        if (!await captchaShown()) {
+          if (globalThis.fgcCaptchaFrom) {
+            console.error('  Captcha gone after ' + Math.round((Date.now() - globalThis.fgcCaptchaFrom) / 1000) + ' s.');
+            globalThis.fgcCaptchaFrom = 0;
+          }
+          return;
+        }
+        globalThis.fgcCaptchaAt = Date.now();
+        globalThis.fgcCaptchaFrom ||= Date.now();
+        const seen = globalThis.fgcCaptchaSeen ??= new Set();
+        if (seen.has(globalThis.fgcGame)) return;
+        seen.add(globalThis.fgcGame);
+        const title = (await page.title().catch(_ => '')).split(' | ')[0];
+        console.error('  Got captcha challenge! Solve it in the browser window within 10 minutes; the claim continues after that.');
+        if (process.env.FGC_LIVE) writeFileSync(process.env.FGC_LIVE, JSON.stringify({ captcha: globalThis.fgcGame, title, at: new Date().toISOString() }));
+        const shot = 'captcha-' + new Date().toISOString().replace(/[:.]/g, '-') + '.png';
+        await page.screenshot({ path: process.env.FGC_CAPTCHA_DIR ? resolve(process.env.FGC_CAPTCHA_DIR, shot) : screenshot(shot) }).catch(_ => {});
+      } finally {
+        globalThis.fgcCaptchaBusy = false;
+      }
+    }, 2000).unref();
+    await pause(6000, 15000); // a person takes a while between games
     await page.goto(url); // , { waitUntil: 'domcontentloaded' });
     // when loading, the button text is empty -> need to wait for some text {'get', 'in library', 'requires base game'} -> just wait for e or i to not be too specific; :text-matches("\w+") somehow didn't work - https://github.com/vogler/free-games-claimer/issues/375
     // was using locator('...').first().waitFor(), but that at some point led to exception locator.waitFor: Error: Can't query n-th element
@@ -266,7 +357,8 @@ try {
       urls.push(url); // add add-on itself again
     } else { // GET
       console.log('  Not in library yet! Click', btnText);
-      await purchaseBtn.click({ delay: 11 }); // got stuck here without delay (or mouse move), see #75, 1ms was also enough
+      await wander(2 + Math.floor(Math.random() * 2), 1); // read the page (and scroll) first, then move to Get and click
+      await humanClick(purchaseBtn); // got stuck here without delay (or mouse move), see #75, 1ms was also enough
 
       // click Continue if 'Device not supported. This product is not compatible with your current device.' - avoided by Windows userAgent?
       page.click('button:has-text("Continue")').catch(_ => { }); // needed since change from Chromium to Firefox?
@@ -316,7 +408,13 @@ try {
       }
 
       // Playwright clicked before button was ready to handle event, https://github.com/vogler/free-games-claimer/issues/84#issuecomment-1474346591
-      await iframe.locator('button:has-text("Add to library"):not(:has(.payment-loading--loading)), button:has-text("Place Order"):not(:has(.payment-loading--loading))').click({ delay: 11 });
+      // wait until the checkout's order button is ready, pause, move to it, click
+      const orderBtn = iframe.locator('button:has-text("Add to library"):not(:has(.payment-loading--loading)), button:has-text("Place Order"):not(:has(.payment-loading--loading))').first();
+      for (const t0 = Date.now(); !await orderBtn.isVisible().catch(_ => false); await page.waitForTimeout(1000))
+        if (Date.now() - t0 > cfg.timeout && !captchaRecent()) throw new Error('checkout: no "Add to library" / "Place Order" button');
+      await pause(2000, 4000);
+      await wander(1);
+      await humanClick(orderBtn);
 
       // I Agree button is only shown for EU accounts! https://github.com/vogler/free-games-claimer/pull/7#issuecomment-1038964872
       const btnAgree = iframe.locator('button:has-text("I Accept")');
@@ -340,15 +438,19 @@ try {
           console.error('  Failed to challenge captcha, please try again later.');
           await notify('epic-games: failed to challenge captcha. Please check.');
         }).catch(_ => { });
-        await Promise.any([
-          page.locator('#launcher-onboard-install-prompt-title').waitFor({ state: 'attached' }),
-          page.locator('button:has-text("Yes, it\'s installed")').waitFor({ state: 'attached' }),
-          page.locator('text=It\'s all yours').waitFor({ state: 'attached' }), // TODO Bundle: got stuck here, but normal game now as well
-          page.locator('text=Download the Epic Games Launcher to play').waitFor({ state: 'attached' }),
-          page.locator('text=Is Epic Games Launcher installed?').waitFor({ state: 'attached' }),
-          page.locator('text=Thank you').waitFor({ state: 'attached' }),
-          page.locator(BUY_BUTTON_SELECTOR).filter({ hasText: /in library/i }).waitFor({ state: 'attached' }),
-        ]);
+        // poll for the confirmation; a captcha on screen extends the wait (solve it by hand).
+        // Upstream's signals except 'text=Thank you' (too generic), plus any visible "In library" button.
+        const confirmed = async () => (await Promise.all([
+          '#launcher-onboard-install-prompt-title',
+          'button:has-text("Yes, it\'s installed")',
+          'text=It\'s all yours', // TODO Bundle: got stuck here, but normal game now as well
+          'text=Download the Epic Games Launcher to play',
+          'text=Is Epic Games Launcher installed?',
+        ].map(sel => page.locator(sel).count().catch(_ => 0)))).some(n => n > 0)
+          || await page.locator(BUY_BUTTON_SELECTOR).filter({ hasText: /in library/i }).count().catch(_ => 0) > 0
+          || await page.evaluate(() => [...document.querySelectorAll('button')].some(b => b.offsetParent !== null && /^in library$/i.test(b.textContent.trim()))).catch(_ => false);
+        for (const t0 = Date.now(); !await confirmed(); await page.waitForTimeout(1000))
+          if (Date.now() - t0 > cfg.timeout && !captchaRecent()) throw new Error('no claim confirmation (timeout)');
         game.status = 'claimed';
         game.time = datetime(); // claimed time overwrites failed/dryrun time
         console.log('  Claimed successfully!');
