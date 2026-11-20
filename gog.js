@@ -26,9 +26,11 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   recordHar: cfg.record ? { path: `data/record/gog-${filenamify(datetime())}.har` } : undefined, // will record a HAR file with network requests and responses; can be imported in Chrome devtools
   handleSIGINT: false, // have to handle ourselves and call context.close(), otherwise recordings from above won't be saved
   // https://peter.sh/experiments/chromium-command-line-switches/
+  chromiumSandbox: true, // keep Chromium's sandbox (Playwright otherwise adds --no-sandbox); fails only in Docker
   args: [
     '--hide-crash-restore-bubble',
     '--force-device-scale-factor=1', '--window-position=0,0', // page 1:1 with screen pixels, also with Windows display scaling
+    '--test-type', // no "unsupported command-line flag" bar for Patchright's AutomationControlled flag
   ],
 });
 
