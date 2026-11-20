@@ -161,8 +161,8 @@ try {
   if (cfg.time) console.timeEnd('login');
   if (cfg.time) console.time('claim all games');
 
-  const urls = await getGameUrls();
-  if (!urls.length) console.error('Seems like currently there are no free games available in your region...'); // see https://github.com/vogler/free-games-claimer/issues/210#issuecomment-1727420943
+  const urls = process.env.EG_ONLY_MOBILE == '1' ? [] : await getGameUrls(); // EG_ONLY_MOBILE=1: only the mobile giveaways
+  if (!urls.length && process.env.EG_ONLY_MOBILE != '1') console.error('Seems like currently there are no free games available in your region...'); // see https://github.com/vogler/free-games-claimer/issues/210#issuecomment-1727420943
 
   // Free mobile games - https://github.com/vogler/free-games-claimer/issues/474
   // https://egs-platform-service.store.epicgames.com/api/v2/public/discover/home?count=10&country=DE&locale=en&platform=android&start=0&store=EGS
