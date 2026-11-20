@@ -26,7 +26,8 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   chromiumSandbox: true, // keep Chromium's sandbox (Playwright otherwise adds --no-sandbox); fails only in Docker
   args: [
     '--hide-crash-restore-bubble',
-    '--force-device-scale-factor=1', '--window-position=0,0', // page 1:1 with screen pixels, also with Windows display scaling
+    '--force-device-scale-factor=1',
+    '--window-position=0,0', // page 1:1 with screen pixels, also with Windows display scaling
     '--test-type', // no "unsupported command-line flag" bar for Patchright's AutomationControlled flag
   ],
 });
@@ -36,7 +37,9 @@ handleSIGINT(context);
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 
 const page = context.pages().length ? context.pages()[0] : await context.newPage(); // should always exist
-await context.newCDPSession(page).then(async s => { const { windowId } = await s.send('Browser.getWindowForTarget'); await s.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } }); }).catch(e => console.error('maximize:', e.message)); // maximized window (--start-maximized is ignored)
+await context.newCDPSession(page).then(async s => {
+  const { windowId } = await s.send('Browser.getWindowForTarget'); await s.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } });
+}).catch(e => console.error('maximize:', e.message)); // maximized window (--start-maximized is ignored)
 await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
 // console.debug('userAgent:', await page.evaluate(() => navigator.userAgent));
 
@@ -204,7 +207,7 @@ try {
     // (div:has-text("Link account") also matched "Unlink account")
     await page.waitForTimeout(3000);
     if (await page.evaluate(() => [...document.querySelectorAll('button, a, [role=button], [data-a-target="LinkAccountModal"]')]
-      .some(e => e.offsetParent !== null && (e.matches('[data-a-target="LinkAccountModal"]') || /^link (game )?account$/i.test(e.textContent.trim())))).catch(_ => false)) {
+      .some(e => e.offsetParent !== null && (e.matches('[data-a-target="LinkAccountModal"]') || (/^link (game )?account$/i).test(e.textContent.trim())))).catch(_ => false)) {
       console.error('  Account linking is required to claim this offer!');
       notify_game.status = `failed: need account linking for ${store}`;
       db.data[user][title].status = 'failed: need account linking';

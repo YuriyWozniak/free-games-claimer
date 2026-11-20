@@ -13,17 +13,12 @@ const getGameUrls = async () => {
   // const body = await (await fetch(`https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?${params}`)).json();
   const body = await (await fetch('https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions')).json();
   const now = new Date();
-  const slug = ({ catalogNs, offerMappings, productSlug, urlSlug }) =>
-    catalogNs?.mappings?.find(m => m.pageType === 'productHome')?.pageSlug ?? catalogNs?.mappings?.[0]?.pageSlug
+  const slug = ({ catalogNs, offerMappings, productSlug, urlSlug }) => catalogNs?.mappings?.find(m => m.pageType === 'productHome')?.pageSlug ?? catalogNs?.mappings?.[0]?.pageSlug
     ?? offerMappings?.find(m => m.pageType === 'productHome')?.pageSlug ?? offerMappings?.[0]?.pageSlug
     ?? productSlug?.replace(/\/home$/, '')
     ?? urlSlug;
   return (body.data?.Catalog?.searchStore?.elements ?? [])
-    .filter(e => e.promotions?.promotionalOffers?.some(({ promotionalOffers }) =>
-      promotionalOffers?.some(({ startDate, endDate, discountSetting }) =>
-        discountSetting?.discountPercentage === 0 && new Date(startDate) <= now && now <= new Date(endDate)
-      )
-    ))
+    .filter(e => e.promotions?.promotionalOffers?.some(({ promotionalOffers }) => promotionalOffers?.some(({ startDate, endDate, discountSetting }) => discountSetting?.discountPercentage === 0 && new Date(startDate) <= now && now <= new Date(endDate))))
     .map(slug)
     .filter(Boolean)
     .map(s => `https://store.epicgames.com/en-US/p/${s}`);
@@ -55,7 +50,8 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   chromiumSandbox: true, // keep Chromium's sandbox (Playwright otherwise adds --no-sandbox); fails only in Docker
   args: [
     '--hide-crash-restore-bubble',
-    '--force-device-scale-factor=1', '--window-position=0,0', // page 1:1 with screen pixels, also with Windows display scaling
+    '--force-device-scale-factor=1',
+    '--window-position=0,0', // page 1:1 with screen pixels, also with Windows display scaling
     '--test-type', // no "unsupported command-line flag" bar for Patchright's AutomationControlled flag
     '--ignore-gpu-blocklist', // required for OpenGL: Disabled -> Enabled & WebGL: Software only -> Hardware accelerated
     '--enable-unsafe-webgpu', // required for WebGPU: Disabled -> Hardware accelerated
@@ -72,7 +68,9 @@ handleSIGINT(context);
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 
 const page = context.pages().length ? context.pages()[0] : await context.newPage(); // should always exist
-await context.newCDPSession(page).then(async s => { const { windowId } = await s.send('Browser.getWindowForTarget'); await s.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } }); }).catch(e => console.error('maximize:', e.message)); // maximized window (--start-maximized is ignored)
+await context.newCDPSession(page).then(async s => {
+  const { windowId } = await s.send('Browser.getWindowForTarget'); await s.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } });
+}).catch(e => console.error('maximize:', e.message)); // maximized window (--start-maximized is ignored)
 // await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
 
 // some debug info about the page (screen dimensions, user agent, platform)
@@ -210,11 +208,15 @@ try {
       Object.assign(mouseAt, { x, y });
     };
     const scroll = async dy => { // wheel in small notches, like a mouse wheel
-      for (let left = Math.abs(dy); left > 0; left -= 100) { await page.mouse.wheel(0, Math.sign(dy) * Math.min(100, left)); await page.waitForTimeout(40 + Math.random() * 120); }
+      for (let left = Math.abs(dy); left > 0; left -= 100) {
+        await page.mouse.wheel(0, Math.sign(dy) * Math.min(100, left)); await page.waitForTimeout(40 + Math.random() * 120);
+      }
     };
     const wander = async (n, scrolls = 0) => { // look around the page while "reading"
       const vp = page.viewportSize() || { width: 1280, height: 800 };
-      for (let i = 0; i < n; i++) { await humanMove(100 + Math.random() * (vp.width - 200), 120 + Math.random() * (vp.height - 240)); await pause(400, 1500); }
+      for (let i = 0; i < n; i++) {
+        await humanMove(100 + Math.random() * (vp.width - 200), 120 + Math.random() * (vp.height - 240)); await pause(400, 1500);
+      }
       if (scrolls) { // read a bit further down, then come back to the button
         const dy = 300 + Math.floor(Math.random() * 500);
         await scroll(dy); await pause(1200, 3500); await scroll(-dy); await pause(500, 1200);
@@ -242,7 +244,7 @@ try {
     globalThis.fgcGame = url; globalThis.fgcCaptchaAt = 0; globalThis.fgcCaptchaFrom = 0;
     const captchaShown = async () => {
       for (const f of page.frames()) {
-        if (!/hcaptcha\.com.*frame=challenge|arkoselabs|funcaptcha/i.test(f.url())) continue;
+        if (!(/hcaptcha\.com.*frame=challenge|arkoselabs|funcaptcha/i).test(f.url())) continue;
         const el = await f.frameElement().catch(_ => null);
         if (el && await el.evaluate(e => {
           const r = e.getBoundingClientRect(), w = e.ownerDocument.defaultView;
@@ -294,7 +296,7 @@ try {
       const labels = /^(get|in library|owned|requires base game|add to library|claim)$/i;
       const btn = document.querySelector('button[data-testid="purchase-cta-button"]')
         || [...document.querySelectorAll('button')].find(b => b.offsetParent !== null && labels.test(b.textContent.trim()));
-      if (!btn || !/[ei]/i.test(btn.textContent) || btn.textContent == 'Loading') return false;
+      if (!btn || !(/[ei]/i).test(btn.textContent) || btn.textContent == 'Loading') return false;
       document.querySelectorAll('[data-fgc-cta]').forEach(e => e.removeAttribute('data-fgc-cta'));
       btn.setAttribute('data-fgc-cta', '1');
       return true;
@@ -368,12 +370,14 @@ try {
           const r = await f.evaluate(name => {
             const text = document.body?.innerText || '';
             const vis = e => e.offsetParent !== null;
-            if (/Welcome back/i.test(text)) {
+            if ((/Welcome back/i).test(text)) {
               const card = [...document.querySelectorAll('button, a, [role=button], li')]
-                .find(e => vis(e) && name && e.textContent.includes(name) && !/another account/i.test(e.textContent));
-              if (card) { card.click(); return 'clicked'; }
+                .find(e => vis(e) && name && e.textContent.includes(name) && !(/another account/i).test(e.textContent));
+              if (card) {
+                card.click(); return 'clicked';
+              }
             }
-            if (/epicgames\.com\/id\//.test(location.href) && [...document.querySelectorAll('input[type=password]')].some(vis)) return 'password';
+            if ((/epicgames\.com\/id\//).test(location.href) && [...document.querySelectorAll('input[type=password]')].some(vis)) return 'password';
             return '';
           }, user).catch(_ => '');
           if (r) return r;
@@ -384,9 +388,11 @@ try {
       for (let i = 0; i < 90 || captchaRecent(); i++) { // a captcha on screen keeps the wait going
         const done = await page.evaluate(() => {
           if (document.querySelector('iframe[src*="/checkout?"], iframe[title="Checkout"]')) return true;
-          const dlg = [...document.querySelectorAll('[role=dialog], section')].find(d => d.offsetParent !== null && /Device not supported/i.test(d.innerText));
-          const btn = dlg && [...dlg.querySelectorAll('button')].find(b => /^continue$/i.test(b.textContent.trim()));
-          if (btn) { btn.click(); return true; }
+          const dlg = [...document.querySelectorAll('[role=dialog], section')].find(d => d.offsetParent !== null && (/Device not supported/i).test(d.innerText));
+          const btn = dlg && [...dlg.querySelectorAll('button')].find(b => (/^continue$/i).test(b.textContent.trim()));
+          if (btn) {
+            btn.click(); return true;
+          }
           return false;
         }).catch(_ => false);
         if (done) break;
@@ -404,8 +410,10 @@ try {
         // back on the store page without a checkout: click Get once more
         if (wbAt >= 0 && i - wbAt == 16) {
           const again = await page.evaluate(() => {
-            const b = [...document.querySelectorAll('button')].find(b => b.offsetParent !== null && /^get$/i.test(b.textContent.trim()));
-            if (b) { b.click(); return true; }
+            const b = [...document.querySelectorAll('button')].find(b => b.offsetParent !== null && (/^get$/i).test(b.textContent.trim()));
+            if (b) {
+              b.click(); return true;
+            }
             return false;
           }).catch(_ => false);
           if (again) console.log('  Clicked Get again after the account confirmation');
@@ -462,8 +470,7 @@ try {
       // Playwright clicked before button was ready to handle event, https://github.com/vogler/free-games-claimer/issues/84#issuecomment-1474346591
       // wait until the checkout's order button is ready, pause, move to it, click
       const orderBtn = iframe.locator('button:has-text("Add to library"):not(:has(.payment-loading--loading)), button:has-text("Place Order"):not(:has(.payment-loading--loading))').first();
-      for (const t0 = Date.now(); !await orderBtn.isVisible().catch(_ => false); await page.waitForTimeout(1000))
-        if (Date.now() - t0 > cfg.timeout && !captchaRecent()) throw new Error('checkout: no "Add to library" / "Place Order" button');
+      for (const t0 = Date.now(); !await orderBtn.isVisible().catch(_ => false); await page.waitForTimeout(1000)) if (Date.now() - t0 > cfg.timeout && !captchaRecent()) throw new Error('checkout: no "Add to library" / "Place Order" button');
       await pause(2000, 4000);
       await wander(1);
       await humanClick(orderBtn);
@@ -500,9 +507,8 @@ try {
           'text=Is Epic Games Launcher installed?',
         ].map(sel => page.locator(sel).count().catch(_ => 0)))).some(n => n > 0)
           || await page.locator(BUY_BUTTON_SELECTOR).filter({ hasText: /in library/i }).count().catch(_ => 0) > 0
-          || await page.evaluate(() => [...document.querySelectorAll('button')].some(b => b.offsetParent !== null && /^in library$/i.test(b.textContent.trim()))).catch(_ => false);
-        for (const t0 = Date.now(); !await confirmed(); await page.waitForTimeout(1000))
-          if (Date.now() - t0 > cfg.timeout && !captchaRecent()) throw new Error('no claim confirmation (timeout)');
+          || await page.evaluate(() => [...document.querySelectorAll('button')].some(b => b.offsetParent !== null && (/^in library$/i).test(b.textContent.trim()))).catch(_ => false);
+        for (const t0 = Date.now(); !await confirmed(); await page.waitForTimeout(1000)) if (Date.now() - t0 > cfg.timeout && !captchaRecent()) throw new Error('no claim confirmation (timeout)');
         game.status = 'claimed';
         game.time = datetime(); // claimed time overwrites failed/dryrun time
         console.log('  Claimed successfully!');

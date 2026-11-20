@@ -53,12 +53,16 @@ export const getPlatformGames = async (context, platform) => {
   }
 };
 
-export const getMobileGames = async (context) => {
+export const getMobileGames = async context => {
   const platforms = (process.env.EG_MOBILE_PLATFORMS || 'android').split(',').map(s => s.trim()).filter(Boolean);
   const r = [];
   for (const platform of platforms) r.push(...await getPlatformGames(context, platform));
   if (process.env.FGC_OFFERS) {
-    try { writeFileSync(process.env.FGC_OFFERS, JSON.stringify(r.filter(g => g.checkout))); } catch (e) { console.error('offers file:', e.message); }
+    try {
+      writeFileSync(process.env.FGC_OFFERS, JSON.stringify(r.filter(g => g.checkout)));
+    } catch (e) {
+      console.error('offers file:', e.message);
+    }
   }
   return r;
 };

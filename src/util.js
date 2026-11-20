@@ -21,7 +21,7 @@ export const datetimeUTC = (d = new Date()) => d.toISOString().replace('T', ' ')
 export const datetime = (d = new Date()) => datetimeUTC(new Date(d.getTime() - d.getTimezoneOffset() * 60000));
 // Parse the stored datetime string (format: "2022-10-06 12:05:27.313") back to Date
 // Convert space to 'T' and add 'Z' to make it ISO format, then parse
-export const dateFromStr = (s) => new Date(s.replace(' ', 'T') + 'Z');
+export const dateFromStr = s => new Date(s.replace(' ', 'T') + 'Z');
 
 export const filenamify = s => s.replaceAll(':', '.').replace(/[^a-z0-9 _\-.]/gi, '_'); // alternative: https://www.npmjs.com/package/filenamify - On Unix-like systems, / is reserved. On Windows, <>:"/\|?* along with trailing periods are reserved.
 

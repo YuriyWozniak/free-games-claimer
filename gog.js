@@ -29,7 +29,8 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   chromiumSandbox: true, // keep Chromium's sandbox (Playwright otherwise adds --no-sandbox); fails only in Docker
   args: [
     '--hide-crash-restore-bubble',
-    '--force-device-scale-factor=1', '--window-position=0,0', // page 1:1 with screen pixels, also with Windows display scaling
+    '--force-device-scale-factor=1',
+    '--window-position=0,0', // page 1:1 with screen pixels, also with Windows display scaling
     '--test-type', // no "unsupported command-line flag" bar for Patchright's AutomationControlled flag
   ],
 });
@@ -39,7 +40,9 @@ handleSIGINT(context);
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 
 const page = context.pages().length ? context.pages()[0] : await context.newPage(); // should always exist
-await context.newCDPSession(page).then(async s => { const { windowId } = await s.send('Browser.getWindowForTarget'); await s.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } }); }).catch(e => console.error('maximize:', e.message)); // maximized window (--start-maximized is ignored)
+await context.newCDPSession(page).then(async s => {
+  const { windowId } = await s.send('Browser.getWindowForTarget'); await s.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } });
+}).catch(e => console.error('maximize:', e.message)); // maximized window (--start-maximized is ignored)
 await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
 // console.debug('userAgent:', await page.evaluate(() => navigator.userAgent));
 
@@ -52,20 +55,16 @@ try {
   await page.goto(URL_CLAIM, { waitUntil: 'domcontentloaded' }); // default 'load' takes forever
 
   // page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll').catch(_ => { }); // does not work reliably, solved by setting CookieConsent above
-  const signIn = page.locator('a:has-text("Sign in")').first();
-  // TODO for the below signIn.waitFor(), patchright failed most of the time with: locator.waitFor: JSHandles can be evaluated only in the context they were created!
-  // await Promise.any([signIn.waitFor(), page.waitForSelector('#menuUsername')]);
-  const username = page.locator('#menuUsername').first();
   // sign-in state from GOG's own /userData.json: menu-v3 has no #menuUsername, and .first() locators threw
   // Patchright's "Can't query n-th element" while the page was loading
   await page.waitForLoadState('load').catch(_ => { });
   const gogUser = () => page.evaluate(() => fetch('/userData.json', { credentials: 'include' }).then(r => r.json()).catch(() => ({})));
   const gogSignedIn = async () => !!(await gogUser()).isLoggedIn;
-  const gogSignInShown = () => page.evaluate(() => [...document.querySelectorAll('a,button')].some(e => /^\s*sign in\s*$/i.test(e.textContent) && e.offsetParent !== null));
+  const gogSignInShown = () => page.evaluate(() => [...document.querySelectorAll('a,button')].some(e => (/^\s*sign in\s*$/i).test(e.textContent) && e.offsetParent !== null));
   while (await gogSignInShown() && !await gogSignedIn()) {
     console.error('Not signed!');
     if (cfg.nowait) process.exit(1);
-    await page.evaluate(() => [...document.querySelectorAll('a,button')].find(e => /^\s*sign in\s*$/i.test(e.textContent) && e.offsetParent !== null)?.click());
+    await page.evaluate(() => [...document.querySelectorAll('a,button')].find(e => (/^\s*sign in\s*$/i).test(e.textContent) && e.offsetParent !== null)?.click());
     // it then creates an iframe for the login
     await page.waitForSelector('#GalaxyAccountsFrameContainer iframe'); // TODO needed?
     const iframe = page.frameLocator('#GalaxyAccountsFrameContainer iframe');
