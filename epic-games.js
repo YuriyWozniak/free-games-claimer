@@ -54,6 +54,7 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   // https://peter.sh/experiments/chromium-command-line-switches/
   args: [
     '--hide-crash-restore-bubble',
+    '--force-device-scale-factor=1', '--window-position=0,0', // page 1:1 with screen pixels, also with Windows display scaling
     '--ignore-gpu-blocklist', // required for OpenGL: Disabled -> Enabled & WebGL: Software only -> Hardware accelerated
     '--enable-unsafe-webgpu', // required for WebGPU: Disabled -> Hardware accelerated
   ],
@@ -69,6 +70,7 @@ handleSIGINT(context);
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 
 const page = context.pages().length ? context.pages()[0] : await context.newPage(); // should always exist
+await context.newCDPSession(page).then(async s => { const { windowId } = await s.send('Browser.getWindowForTarget'); await s.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } }); }).catch(e => console.error('maximize:', e.message)); // maximized window (--start-maximized is ignored)
 // await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
 
 // some debug info about the page (screen dimensions, user agent, platform)

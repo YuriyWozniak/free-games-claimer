@@ -25,6 +25,7 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   handleSIGINT: false, // have to handle ourselves and call context.close(), otherwise recordings from above won't be saved
   args: [
     '--hide-crash-restore-bubble',
+    '--force-device-scale-factor=1', '--window-position=0,0', // page 1:1 with screen pixels, also with Windows display scaling
   ],
 });
 
@@ -33,6 +34,7 @@ handleSIGINT(context);
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 
 const page = context.pages().length ? context.pages()[0] : await context.newPage(); // should always exist
+await context.newCDPSession(page).then(async s => { const { windowId } = await s.send('Browser.getWindowForTarget'); await s.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } }); }).catch(e => console.error('maximize:', e.message)); // maximized window (--start-maximized is ignored)
 await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
 // console.debug('userAgent:', await page.evaluate(() => navigator.userAgent));
 
