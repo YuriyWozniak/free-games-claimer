@@ -361,7 +361,57 @@ try {
       await humanClick(purchaseBtn); // got stuck here without delay (or mouse move), see #75, 1ms was also enough
 
       // click Continue if 'Device not supported. This product is not compatible with your current device.' - avoided by Windows userAgent?
-      page.click('button:has-text("Continue")').catch(_ => { }); // needed since change from Chromium to Firefox?
+      // "Device not supported - This product is not compatible with your current device" (mobile items): click its visible Continue
+      // "Welcome back" account picker (page, popup or login iframe): continue as the signed-in account
+      const welcomeBack = async () => {
+        for (const p of context.pages()) for (const f of p.frames()) {
+          const r = await f.evaluate(name => {
+            const text = document.body?.innerText || '';
+            const vis = e => e.offsetParent !== null;
+            if (/Welcome back/i.test(text)) {
+              const card = [...document.querySelectorAll('button, a, [role=button], li')]
+                .find(e => vis(e) && name && e.textContent.includes(name) && !/another account/i.test(e.textContent));
+              if (card) { card.click(); return 'clicked'; }
+            }
+            if (/epicgames\.com\/id\//.test(location.href) && [...document.querySelectorAll('input[type=password]')].some(vis)) return 'password';
+            return '';
+          }, user).catch(_ => '');
+          if (r) return r;
+        }
+        return '';
+      };
+      let wbClicks = 0, wbAt = -1;
+      for (let i = 0; i < 90 || captchaRecent(); i++) { // a captcha on screen keeps the wait going
+        const done = await page.evaluate(() => {
+          if (document.querySelector('iframe[src*="/checkout?"], iframe[title="Checkout"]')) return true;
+          const dlg = [...document.querySelectorAll('[role=dialog], section')].find(d => d.offsetParent !== null && /Device not supported/i.test(d.innerText));
+          const btn = dlg && [...dlg.querySelectorAll('button')].find(b => /^continue$/i.test(b.textContent.trim()));
+          if (btn) { btn.click(); return true; }
+          return false;
+        }).catch(_ => false);
+        if (done) break;
+        const wb = await welcomeBack();
+        if (wb == 'password') {
+          console.error('  Not signed in anymore: Epic asks for the password before the checkout. Sign in again.');
+          if (cfg.nowait) process.exit(1);
+        }
+        if (wb == 'clicked' && wbClicks < 3) {
+          wbClicks++; wbAt = i;
+          console.log('  Epic asked to confirm the account ("Welcome back"): continued as', user);
+          await page.waitForTimeout(3000);
+          continue;
+        }
+        // back on the store page without a checkout: click Get once more
+        if (wbAt >= 0 && i - wbAt == 16) {
+          const again = await page.evaluate(() => {
+            const b = [...document.querySelectorAll('button')].find(b => b.offsetParent !== null && /^get$/i.test(b.textContent.trim()));
+            if (b) { b.click(); return true; }
+            return false;
+          }).catch(_ => false);
+          if (again) console.log('  Clicked Get again after the account confirmation');
+        }
+        await page.waitForTimeout(500);
+      }
 
       // click 'Yes, buy now' if 'This edition contains something you already have. Still interested?'
       page.click('button:has-text("Yes, buy now")').catch(_ => { });
