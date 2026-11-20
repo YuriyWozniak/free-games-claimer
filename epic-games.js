@@ -518,7 +518,7 @@ try {
       notify_game.status = game.status; // claimed or failed
 
       const p = screenshot(`${game_id}.png`);
-      if (!existsSync(p)) await page.screenshot({ path: p, fullPage: false }); // fullPage is quite long...
+      if (p && !existsSync(p)) await page.screenshot({ path: p, fullPage: false }); // fullPage is quite long... (p is null with SCREENSHOTS_DIR=0)
       await page.keyboard.press('Escape').catch(_ => { }); // close the launcher prompt
       await page.goto('about:blank').catch(_ => { });
     }
