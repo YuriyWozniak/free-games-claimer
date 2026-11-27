@@ -292,7 +292,8 @@ try {
     // when loading, the button text is empty -> need to wait for some text {'get', 'in library', 'requires base game'} -> just wait for e or i to not be too specific; :text-matches("\w+") somehow didn't work - https://github.com/vogler/free-games-claimer/issues/375
     // was using locator('...').first().waitFor(), but that at some point led to exception locator.waitFor: Error: Can't query n-th element
     // the redesign dropped data-testid="purchase-cta-button": find the purchase button by its label and mark it
-    await page.waitForFunction(() => {
+    const ready = await (await page.waitForFunction(() => {
+      if ((/currently unavailable in your platform or region/i).test(document.body?.innerText || '')) return 'unavailable';
       const labels = /^(get|in library|owned|requires base game|add to library|claim)$/i;
       const btn = document.querySelector('button[data-testid="purchase-cta-button"]')
         || [...document.querySelectorAll('button')].find(b => b.offsetParent !== null && labels.test(b.textContent.trim()));
@@ -300,12 +301,20 @@ try {
       document.querySelectorAll('[data-fgc-cta]').forEach(e => e.removeAttribute('data-fgc-cta'));
       btn.setAttribute('data-fgc-cta', '1');
       return true;
-    });
+    })).jsonValue();
+    if (ready == 'unavailable') { // the store page itself is blocked, e.g. a giveaway not offered in the account's country
+      console.error('  This product is unavailable in your platform or region!', url);
+      notify_games.push({ title: game?.title ?? game_id, url, status: 'unavailable-in-region' });
+      if (cfg.time) console.timeEnd('claim game');
+      continue;
+    }
     const purchaseBtn = page.locator('button[data-fgc-cta]');
     const btnText = (await purchaseBtn.innerText()).toLowerCase(); // barrier to block until page is loaded
 
     // click Continue if 'This game contains mature content recommended only for ages 18+'
-    if (await page.locator('button:has-text("Continue")').count() > 0) {
+    // only an enabled Continue is the gate: pages can also carry a disabled one (e.g. owned free-to-play games), and clicking it times out
+    const ageContinue = page.locator('button:has-text("Continue")').first();
+    if (await ageContinue.count() > 0 && (await ageContinue.isEnabled() || await page.locator('[data-testid="AgeSelect"]').count())) {
       console.log('  This game contains mature content recommended only for ages 18+');
       if (await page.locator('[data-testid="AgeSelect"]').count()) {
         console.error('  Got "To continue, please provide your date of birth" - This shouldn\'t happen due to cookie set above. Please report to https://github.com/vogler/free-games-claimer/issues/275');
@@ -384,10 +393,12 @@ try {
         }
         return '';
       };
-      let wbClicks = 0, wbAt = -1;
+      let wbClicks = 0, wbAt = -1, addedDirectly = false;
       for (let i = 0; i < 90 || captchaRecent(); i++) { // a captcha on screen keeps the wait going
         const done = await page.evaluate(() => {
           if (document.querySelector('iframe[src*="/checkout?"], iframe[title="Checkout"]')) return true;
+          // free-to-play items go straight to the library: no checkout, Get turns into "In Library"
+          if ([...document.querySelectorAll('button')].some(b => b.offsetParent !== null && (/^in library$/i).test(b.textContent.trim()))) return 'owned';
           const dlg = [...document.querySelectorAll('[role=dialog], section')].find(d => d.offsetParent !== null && (/Device not supported/i).test(d.innerText));
           const btn = dlg && [...dlg.querySelectorAll('button')].find(b => (/^continue$/i).test(b.textContent.trim()));
           if (btn) {
@@ -395,6 +406,7 @@ try {
           }
           return false;
         }).catch(_ => false);
+        if (done == 'owned') addedDirectly = true;
         if (done) break;
         const wb = await welcomeBack();
         if (wb == 'password') {
@@ -419,6 +431,14 @@ try {
           if (again) console.log('  Clicked Get again after the account confirmation');
         }
         await page.waitForTimeout(500);
+      }
+      if (addedDirectly) {
+        console.log('  Added to the library without a checkout. Claimed successfully!');
+        game.status = notify_game.status = 'claimed';
+        game.time = datetime();
+        await page.goto('about:blank').catch(_ => { });
+        if (cfg.time) console.timeEnd('claim game');
+        continue;
       }
 
       // click 'Yes, buy now' if 'This edition contains something you already have. Still interested?'
